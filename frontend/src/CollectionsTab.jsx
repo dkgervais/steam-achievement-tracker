@@ -22,6 +22,14 @@ export default function CollectionsTab({ collections, setCollections, achievemen
     });
   };
 
+  const deleteCollection = (colIdx) => {
+    setCollections(prev => {
+      const updated = prev.filter((_, idx) => idx !== colIdx);
+      localStorage.setItem("achievementCollections", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   return (
     <div>
       <div style={{ marginBottom: "1.5rem", textAlign: "center" }}>
@@ -58,7 +66,25 @@ export default function CollectionsTab({ collections, setCollections, achievemen
       ) : (
         collections.map((col, colIdx) => (
           <div key={col.name} style={{ marginBottom: "2rem", background: "#f8fafc", borderRadius: "8px", padding: "1rem" }}>
-            <h3 style={{ color: "#2563eb", marginBottom: "1rem" }}>{col.name}</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ color: "#2563eb", marginBottom: "1rem" }}>{col.name}</h3>
+              <button
+                onClick={() => deleteCollection(colIdx)}
+                style={{
+                  background: "#ef4444",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "0.3rem 0.8rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  marginLeft: "1rem"
+                }}
+                title="Delete this collection"
+              >
+                Delete
+              </button>
+            </div>
             {col.achievements.length === 0 ? (
               <p style={{ color: "#64748b" }}>No achievements in this collection.</p>
             ) : (

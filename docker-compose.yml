@@ -4,14 +4,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - STEAM_API_KEY=20E682974E8D725E00DE6B99BF9D123F
-      - STEAM_ID=76561198028318418
+      - STEAM_API_KEY=${STEAM_API_KEY}
+      - STEAM_ID=${STEAM_ID}
   frontend:
     build: ./frontend
     ports:
       - "3000:3000"
-    # volumes:
-    #   - ./frontend:/app
-    #   - /app/node_modules  # Prevents host node_modules from conflicting
     stdin_open: true
     tty: true

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import Modal from "react-modal";
 
 const placeholderIcon = "https://via.placeholder.com/64?text=No+Icon";
@@ -11,7 +11,17 @@ export default function AchievementsModal({
   achLoading,
   getAchIconUrl,
   onAddToCollection,
+  collections = [], // <-- pass collections from App.js
 }) {
+  const [addToColAch, setAddToColAch] = useState(null);
+  const [newColName, setNewColName] = useState("");
+
+  const handleAdd = (collectionName) => {
+    onAddToCollection(addToColAch, selectedGame.appid, collectionName);
+    setAddToColAch(null);
+    setNewColName("");
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -75,7 +85,8 @@ export default function AchievementsModal({
               fontWeight: 700,
             }}
           >
-            {selectedGame.name} Achievements
+            {selectedGame.name}
+            Achievements
           </h2>
 
           {achLoading ? (
@@ -197,13 +208,145 @@ export default function AchievementsModal({
                         cursor: "pointer",
                         fontSize: "0.9rem",
                       }}
-                      onClick={() => onAddToCollection(a, selectedGame.appid)}
+                      onClick={() => setAddToColAch(a)}
                     >
                       Add to collection...
                     </button>
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {addToColAch && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100vw",
+                height: "100vh",
+                background: "rgba(30,41,59,0.4)",
+                zIndex: 2000,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              onClick={() => setAddToColAch(null)}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  borderRadius: "10px",
+                  padding: "2rem",
+                  minWidth: "320px",
+                  boxShadow: "0 2px 16px rgba(30,41,59,0.15)",
+                  position: "relative",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3
+                  style={{
+                    marginBottom: "1rem",
+                    color: "#2563eb",
+                    textAlign: "center",
+                  }}
+                >
+                  Add to Collection
+                </h3>
+                {collections.length === 0 && (
+                  <div
+                    style={{
+                      color: "#64748b",
+                      marginBottom: "1rem",
+                    }}
+                  >
+                    No collections yet. Create one below!
+                  </div>
+                )}
+                <ul
+                  style={{
+                    listStyle: "none",
+                    padding: 0,
+                    marginBottom: "1rem",
+                  }}
+                >
+                  {collections.map((col) => (
+                    <li
+                      key={col.name}
+                      style={{
+                        marginBottom: "0.5rem",
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>{col.name}</span>
+                      <button
+                        style={{
+                          background: "#2563eb",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "5px",
+                          padding: "0.3rem 0.8rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          fontSize: "0.9rem",
+                        }}
+                        onClick={() => handleAdd(col.name)}
+                      >
+                        Add
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    type="text"
+                    placeholder="New collection name"
+                    value={newColName}
+                    onChange={(e) => setNewColName(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: "0.4rem 0.7rem",
+                      borderRadius: "5px",
+                      border: "1px solid #3b82f6",
+                      fontSize: "1rem",
+                    }}
+                  />
+                  <button
+                    style={{
+                      background: "#22c55e",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "5px",
+                      padding: "0.4rem 1rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontSize: "0.9rem",
+                    }}
+                    disabled={!newColName.trim()}
+                    onClick={() => handleAdd(newColName.trim())}
+                  >
+                    Create & Add
+                  </button>
+                </div>
+                <button
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    right: 10,
+                    background: "transparent",
+                    border: "none",
+                    fontSize: "1.3rem",
+                    color: "#64748b",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setAddToColAch(null)}
+                  aria-label="Close"
+                >
+                  &times;
+                </button>
+              </div>
             </div>
           )}
         </>
