@@ -1,247 +1,348 @@
 import React, { useEffect, useState } from 'react';
 import Modal from 'react-modal';
+import GameGrid from './GameGrid';
+import AchievementsModal from './AchievementsModal';
+import SettingsModal from './SettingsModal';
+import CollectionsTab from './CollectionsTab';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
-// For accessibility, bind modal to root app element
 Modal.setAppElement('#root');
 
 function App() {
   const [games, setGames] = useState([]);
   const [gamesLoading, setGamesLoading] = useState(true);
   const [selectedGame, setSelectedGame] = useState(null);
-  const [achievements, setAchievements] = useState([]);
+  const [achievementsMap, setAchievementsMap] = useState({}); // { [appid]: [achievements] }
   const [achLoading, setAchLoading] = useState(false);
   const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gamesSearch, setGamesSearch] = useState("");
 
+  // Settings state
+  const [apiKey, setApiKey] = useState(localStorage.getItem("steamApiKey") || "");
+  const [steamId, setSteamId] = useState(localStorage.getItem("steamId") || "");
+
+  // New state for tabs and collections
+  const [activeTab, setActiveTab] = useState("games"); // "games" or "collections"
+  const [collections, setCollections] = useState(() => {
+    // Persist collections in localStorage
+    const saved = localStorage.getItem("achievementCollections");
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Save settings to localStorage
+  const handleSaveSettings = (newApiKey, newSteamId) => {
+    setApiKey(newApiKey);
+    setSteamId(newSteamId);
+    localStorage.setItem("steamApiKey", newApiKey);
+    localStorage.setItem("steamId", newSteamId);
+  };
+
+  // Fetch games and all achievements on mount
   useEffect(() => {
-    async function fetchGames() {
+    async function fetchGamesAndAchievements() {
       setGamesLoading(true);
       try {
         const res = await fetch(`${BACKEND}/api/games`);
         if (!res.ok) throw new Error(`Games fetch failed: ${res.statusText}`);
         const data = await res.json();
-        setGames(data.response?.games || []);
+        const gamesList = data.response?.games || [];
+
+        // Fetch achievement schemas for all games in parallel using your backend proxy
+        const schemaResults = await Promise.all(
+          gamesList.map(async (game) => {
+            try {
+              // Fetch schema (achievement definitions)
+              const schemaRes = await fetch(
+                `${BACKEND}/api/achievement-schema?appid=${game.appid}&key=${apiKey}`
+              );
+              if (!schemaRes.ok) return { appid: game.appid, achievements: [] };
+              const schemaData = await schemaRes.json();
+              const schemaAchievements = schemaData.game?.availableGameStats?.achievements || [];
+
+              // Fetch player achievements (progress)
+              const playerRes = await fetch(
+                `${BACKEND}/api/achievements?appid=${game.appid}`
+              );
+              let playerAchievements = [];
+              if (playerRes.ok) {
+                const playerData = await playerRes.json();
+                playerAchievements = playerData.playerstats?.achievements || [];
+              }
+
+              // Map player's achieved status by apiname
+              const achievedMap = {};
+              playerAchievements.forEach(a => {
+                achievedMap[a.apiname] = a.achieved;
+              });
+
+              // Merge achieved status into schema achievements
+              return {
+                appid: game.appid,
+                achievements: schemaAchievements.map(a => ({
+                  apiname: a.name,
+                  displayName: a.displayName,
+                  description: a.description,
+                  icon: a.icon,
+                  icongray: a.icongray,
+                  hidden: a.hidden,
+                  achieved: achievedMap[a.name] ?? 0, // 1 if achieved, 0 if not, or 0 if missing
+                })),
+              };
+            } catch {
+              return { appid: game.appid, achievements: [] };
+            }
+          })
+        );
+
+        // Build a map: { appid: [achievements] }
+        const achMap = {};
+        schemaResults.forEach(({ appid, achievements }) => {
+          achMap[appid] = achievements;
+        });
+        setAchievementsMap(achMap);
+
+        // Filter games to only those with at least one achievement
+        const gamesWithAchievements = gamesList.filter(
+          (game) => (achMap[game.appid] && achMap[game.appid].length > 0)
+        );
+        const gamesWithAchievementsSorted = gamesWithAchievements.sort((a, b) => {
+          const aName = a.name.toLowerCase();
+          const bName = b.name.toLowerCase();
+          return aName.localeCompare(bName);
+        });
+        setGames(gamesWithAchievementsSorted);
       } catch (err) {
         setError(err.message);
       } finally {
         setGamesLoading(false);
       }
     }
-    fetchGames();
-  }, []);
+    if (apiKey) {
+      fetchGamesAndAchievements();
+    }
+  }, [apiKey]);
 
+  // When a game is selected, set its achievements from the map
   useEffect(() => {
     if (!selectedGame) return;
-
-    async function fetchAchievements() {
-      setAchLoading(true);
-      try {
-        const res = await fetch(`${BACKEND}/api/achievements?appid=${selectedGame.appid}`);
-        if (!res.ok) throw new Error(`Achievements fetch failed: ${res.statusText}`);
-        const data = await res.json();
-        setAchievements(data.playerstats?.achievements || []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setAchLoading(false);
-      }
-    }
-    fetchAchievements();
+    setAchLoading(true);
+    setTimeout(() => {
+      setAchLoading(false);
+    }, 300); // Simulate loading
   }, [selectedGame]);
+
+  useEffect(() => {
+    if (games.length > 0) {
+      console.log("First game object:", games[0]);
+      console.log("Game fields:", Object.keys(games[0]));
+    }
+  }, [games]);
 
   const getIconUrl = (appid, img_icon_url) =>
     `https://media.steampowered.com/steamcommunity/public/images/apps/${appid}/${img_icon_url}.jpg`;
 
-  // Achievement icon URL helper
-  const getAchIconUrl = (appid, ach) => 
-    `http://media.steampowered.com/steamcommunity/public/images/apps/${appid}/${ach.apiname.toLowerCase()}.jpg`;
+  const getAchIconUrl = (appid, ach) => {
+    // Use the icon from the schema (already in achievementsMap)
+    return ach.achieved === 1 ? ach.icon : ach.icongray;
+  };
 
+  // Filter games by search
+  const filteredGames = games.filter(game =>
+    game.name.toLowerCase().includes(gamesSearch.toLowerCase())
+  );
 
-  console.log("games: ", games);
-  console.log("achievements: ", achievements);
+  const handleAddToCollection = (achievement, appid) => {
+    const achWithAppid = { ...achievement, appid };
+    const collectionName = prompt("Enter collection name to add to:");
+    if (!collectionName) return;
+    setCollections(prev => {
+      const idx = prev.findIndex(c => c.name === collectionName);
+      let updated;
+      if (idx === -1) {
+        updated = [...prev, { name: collectionName, achievements: [achWithAppid] }];
+      } else {
+        // Avoid duplicates
+        const exists = prev[idx].achievements.some(a => a.apiname === achievement.apiname && a.appid === appid);
+        if (exists) return prev;
+        updated = [...prev];
+        updated[idx] = {
+          ...updated[idx],
+          achievements: [...updated[idx].achievements, achWithAppid]
+        };
+      }
+      localStorage.setItem("achievementCollections", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   return (
-    <div style={{ fontFamily: 'sans-serif', padding: '2rem' }}>
-      <h1>Steam Achievement Tracker</h1>
-      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
-
-      <section>
-        <h2>Your Games</h2>
-        {gamesLoading ? (
-          <p>Loading games…</p>
-        ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-              gap: '1rem',
-              marginTop: '1rem',
-            }}
-          >
-            {games.map((game) => (
-              <div
-                key={game.appid}
-                onClick={() => setSelectedGame(game)}
-                style={{
-                  cursor: 'pointer',
-                  padding: '1rem',
-                  backgroundColor: '#f9f9f9',
-                  border: '1px solid #ccc',
-                  borderRadius: '8px',
-                  textAlign: 'center',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                  transition: 'transform 0.2s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
-                onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-              >
-                <img
-                  src={getIconUrl(game.appid, game.img_icon_url)}
-                  alt={game.name}
-                  style={{ width: '64px', height: '64px', marginBottom: '0.5rem', borderRadius: '8px' }}
-                />
-                <div
-                  style={{
-                    fontSize: '0.9rem',
-                    fontWeight: '600',
-                    wordWrap: 'break-word',
-                    overflowWrap: 'break-word',
-                  }}
-                >
-                  {game.name}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Modal */}
-      <Modal
-        isOpen={!!selectedGame}
-        onRequestClose={() => setSelectedGame(null)}
-        contentLabel="Game Achievements Modal"
+    <div
+      style={{
+        fontFamily: 'sans-serif',
+        padding: '2rem',
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #e0e7ef 0%, #f1f5f9 100%)',
+      }}
+    >
+      <div
         style={{
-          overlay: {
-            backgroundColor: 'rgba(0,0,0,0.6)',
-            zIndex: 1000,
-          },
-          content: {
-            maxWidth: '700px',
-            maxHeight: '90vh',
-            margin: 'auto',
-            padding: '1.5rem',
-            borderRadius: '10px',
-            overflowY: 'auto',
-            fontFamily: 'sans-serif',
-          },
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "2rem",
         }}
       >
-        {selectedGame && (
-          <>
-            <button
-              onClick={() => setSelectedGame(null)}
+        <h1
+          style={{
+            flex: 1,
+            textAlign: "center",
+            fontFamily: "'Cinzel', serif",
+            fontSize: "2.8rem",
+            color: "#2563eb",
+            letterSpacing: "2px",
+            fontWeight: 700,
+            margin: 0,
+          }}
+        >
+          Steam Achievement Tracker
+        </h1>
+        <button
+          onClick={() => setSettingsOpen(true)}
+          style={{
+            background: "#3b82f6",
+            color: "#fff",
+            border: "none",
+            borderRadius: "5px",
+            padding: "0.7rem 1.4rem",
+            fontSize: "1.1rem",
+            fontWeight: 600,
+            boxShadow: "0 2px 8px rgba(59,130,246,0.12)",
+            cursor: "pointer",
+            marginLeft: "1.5rem",
+          }}
+        >
+          Settings
+        </button>
+      </div>
+      {error && <p style={{ color: 'red', textAlign: 'center' }}>Error: {error}</p>}
+
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: "2rem" }}>
+        <button
+          onClick={() => setActiveTab("games")}
+          style={{
+            padding: "0.7rem 2rem",
+            borderRadius: "6px 0 0 6px",
+            border: "1px solid #3b82f6",
+            background: activeTab === "games" ? "#3b82f6" : "#e0e7ef",
+            color: activeTab === "games" ? "#fff" : "#2563eb",
+            fontWeight: 600,
+            cursor: "pointer",
+            outline: "none"
+          }}
+        >
+          Games
+        </button>
+        <button
+          onClick={() => setActiveTab("collections")}
+          style={{
+            padding: "0.7rem 2rem",
+            borderRadius: "0 6px 6px 0",
+            border: "1px solid #3b82f6",
+            borderLeft: "none",
+            background: activeTab === "collections" ? "#3b82f6" : "#e0e7ef",
+            color: activeTab === "collections" ? "#fff" : "#2563eb",
+            fontWeight: 600,
+            cursor: "pointer",
+            outline: "none"
+          }}
+        >
+          Collections
+        </button>
+      </div>
+
+      <section>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "1rem" }}>
+          <input
+            type="text"
+            placeholder="Search games..."
+            value={gamesSearch}
+            onChange={e => setGamesSearch(e.target.value)}
+            style={{
+              width: "100%",
+              maxWidth: "400px",
+              padding: "0.6rem 1rem",
+              borderRadius: "6px",
+              border: "1px solid #3b82f6",
+              fontSize: "1rem",
+              outline: "none",
+              boxShadow: "0 1px 4px rgba(59,130,246,0.06)",
+            }}
+          />
+        </div>
+        {gamesLoading ? (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "80px" }}>
+            <div
               style={{
-                position: 'absolute',
-                top: '15px',
-                right: '15px',
-                background: 'transparent',
-                border: 'none',
-                fontSize: '1.5rem',
-                cursor: 'pointer',
-                fontWeight: 'bold',
+                border: "4px solid #dbeafe",
+                borderTop: "4px solid #2563eb",
+                borderRadius: "50%",
+                width: "40px",
+                height: "40px",
+                animation: "spin 1s linear infinite",
               }}
-              aria-label="Close modal"
-            >
-              &times;
-            </button>
+            />
+            <style>
+              {`
+                @keyframes spin {
+                  0% { transform: rotate(0deg);}
+                  100% { transform: rotate(360deg);}
+                }
+              `}
+            </style>
+          </div>
+        ) : (
+          <>
+            {activeTab === "games" && (
+              <GameGrid games={filteredGames} onSelect={setSelectedGame} getIconUrl={getIconUrl} />
+            )}
 
-            <h2 style={{ marginBottom: '1rem' }}>{selectedGame.name} Achievements</h2>
-
-            {achLoading ? (
-              <p>Loading achievements…</p>
-            ) : achievements.length === 0 ? (
-              <p>No achievements found.</p>
-            ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                  gap: '1rem',
-                  marginTop: '1rem',
-                }}
-              >
-                {achievements.map((a) => {
-                  const unlocked = a.achieved === 1;
-                  const iconUrl = getAchIconUrl(selectedGame.appid, a);
-                  return (
-                    <div
-                      key={a.apiname}
-                      title={a.description || ''}
-                      style={{
-                        borderRadius: '8px',
-                        padding: '0.5rem',
-                        backgroundColor: unlocked ? '#e0f7fa' : '#f0f0f0',
-                        color: unlocked ? '#00796b' : '#888',
-                        boxShadow: unlocked
-                          ? '0 0 10px #26a69a'
-                          : 'inset 0 0 5px #ccc',
-                        filter: unlocked ? 'none' : 'grayscale(80%)',
-                        transition: 'transform 0.2s',
-                        cursor: 'default',
-                        textAlign: 'center',
-                        userSelect: 'none',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                      }}
-                    >
-                      {iconUrl ? (
-                        <img
-                          src={iconUrl}
-                          alt={a.displayName || a.apiname}
-                          onError={(e => {e.target.onerror = null; e.target.src = iconUrl})}
-                          style={{
-                            width: '64px',
-                            height: '64px',
-                            marginBottom: '0.5rem',
-                            borderRadius: '8px',
-                            objectFit: 'contain',
-                          }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: '64px',
-                            height: '64px',
-                            marginBottom: '0.5rem',
-                            borderRadius: '8px',
-                            backgroundColor: '#ccc',
-                          }}
-                        />
-                      )}
-                      <div
-                        style={{
-                          fontWeight: '700',
-                          marginBottom: '0.3rem',
-                          fontSize: '0.9rem',
-                          wordWrap: 'break-word',
-                          overflowWrap: 'break-word',
-                        }}
-                      >
-                        {a.displayName || a.apiname}
-                      </div>
-                      <div style={{ fontSize: '0.8rem' }}>
-                        {unlocked ? 'Unlocked ✅' : 'Locked ❌'}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            {activeTab === "collections" && (
+              <CollectionsTab
+                collections={collections}
+                setCollections={setCollections}
+                achievementsMap={achievementsMap}
+                games={games}
+              />
             )}
           </>
         )}
-      </Modal>
+      </section>
+
+      <AchievementsModal
+        isOpen={!!selectedGame}
+        onRequestClose={() => setSelectedGame(null)}
+        selectedGame={selectedGame}
+        achievements={
+          selectedGame
+            ? [...(achievementsMap[selectedGame.appid] || [])].sort((a, b) =>
+                (a.displayName || a.apiname || "").localeCompare(b.displayName || b.apiname || "")
+              )
+            : []
+        }
+        achLoading={achLoading}
+        getAchIconUrl={getAchIconUrl}
+        onAddToCollection={handleAddToCollection}
+      />
+
+      <SettingsModal
+        isOpen={settingsOpen}
+        onRequestClose={() => setSettingsOpen(false)}
+        onSave={handleSaveSettings}
+        initialApiKey={apiKey}
+        initialSteamId={steamId}
+      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import requests
@@ -43,4 +43,39 @@ def get_achievements(appid: int):
         "appid": appid,
     }
     response = requests.get(url, params=params)
+    return response.json()
+
+@app.get("/api/achievement-schema")
+def get_achievement_schema(appid: int, key: str = Query(None)):
+    """
+    Proxy endpoint to fetch the achievement schema for a game from Steam.
+    If 'key' is not provided, uses the backend's STEAM_API_KEY.
+    """
+    steam_key = key or STEAM_API_KEY
+    if not steam_key:
+        raise HTTPException(status_code=500, detail="API key not configured.")
+
+    url = "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/"
+    params = {
+        "key": steam_key,
+        "appid": appid,
+    }
+    response = requests.get(url, params=params)
+    if not response.ok:
+        raise HTTPException(status_code=502, detail="Failed to fetch schema from Steam.")
+    return response.json()
+
+@app.get("/api/fetch-schema")
+async def fetch_schema(appid: int, api_key: str):
+    """
+    Fetch the achievement schema for a game using the provided API key.
+    """
+    url = "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/"
+    params = {
+        "key": api_key,
+        "appid": appid,
+    }
+    response = requests.get(url, params=params)
+    if not response.ok:
+        raise HTTPException(status_code=502, detail="Failed to fetch schema from Steam.")
     return response.json()
